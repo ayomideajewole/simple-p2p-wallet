@@ -1,5 +1,5 @@
 import express from "express";
-import { initializePayment, verifyPayment } from "../middleware/wallet";
+import { initializePayment, transferWalletFunds, verifyPayment } from "../middleware/wallet";
 import auth from "../middleware/auth";
 
 
@@ -12,6 +12,10 @@ router.post("/",[
 router.post("/fundWallet",[
   auth,
   verifyPayment
+]);
+router.patch("/transferFunds",[
+  auth,
+  transferWalletFunds
 ]);
 
 export default router;

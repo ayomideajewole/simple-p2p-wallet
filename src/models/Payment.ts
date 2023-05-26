@@ -4,6 +4,10 @@ import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
 
 const paymentSchema = new mongoose.Schema({
+  amount:{
+    type: Number,
+    required: true,
+  },
   reference:{
     type: String,
     required: true,
@@ -25,6 +29,7 @@ export const Payment = mongoose.model('payment', paymentSchema);
 
 export function validate(payment:{}) {
   const schema = Joi.object({
+    amount: Joi.number().required(),
     userId: Joi.string().required(),
     reference: Joi.string().required(),
     paymentGatewayResponse: Joi.object(),

@@ -15,7 +15,7 @@ export const signUp =async (req:Request, res:Response) => {
       });
     }
 
-    let user = await User.findOne({email:req.body.email, isDeleted:false});
+    let user = await User.findOne({email:req.body.email});
     if(user)
       return res.status(401).json({
         status: 'failed!',

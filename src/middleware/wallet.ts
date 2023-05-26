@@ -10,7 +10,7 @@ const header = {
     }
 }
 
-export async function createWallet(user:any, res:Response){
+export const createWallet = async(user:any, res:Response) => {
 try {
     const {error} = validateWallet(user._id);
     if(error)
@@ -32,7 +32,7 @@ try {
 }
 }
 
-export async function initializePayment(req:Request, res:Response){
+export const initializePayment = async(req:Request, res:Response) => {
 try {
     const data = {
       email: req.body.user.email,
@@ -43,13 +43,11 @@ try {
     if (initialize.status !== true)
       return res.status(400).json({
         status: 'failed',
-        statusCode: 400,
         message: 'The payment failed. Kindly try again.',
       });
     
     return res.status(200).json({
       status: 'success',
-      statusCode: 200,
       message: `Payment initialized successfully. 
         Kindly follow this link to complete your payment:
         ${initialize.authorization_url}`
@@ -59,14 +57,13 @@ try {
 }
 }
 
-export async function verifyPayment(req:any, res:Response){
+export const verifyPayment = async(req:any, res:Response) => {
 try {
     let check = new PaymentCheck();
     let paymentExists = await check.isPaymentDuplicated(req.query.reference, res);
     if (paymentExists)
       return res.status(400).json({
         status: 'failed',
-        statusCode: 400,
         message: 'This payment already exists!',
       });
     
@@ -74,12 +71,12 @@ try {
     let verifyPaystackPayment = await paystack.verifyTransaction(res);
     if (verifyPaystackPayment.data.status !== 'success')
       return res.status(400).json({
-        status: 'success',
-        statusCode: 400,
+        status: 'failed',
         message: 'This payment is invalid.'
       });
 
     let paymentData = {
+      amount: verifyPaystackPayment.data.status.amount/100,
       userId: req.body.user._id,
       reference: req.query.reference,
       paymentGatewayResponse: verifyPaystackPayment
@@ -87,13 +84,49 @@ try {
     let payment = new Payment(paymentData);
     await payment.save();
     await fundWallet(req);
+    return res.status(200).json({
+      status: 'success',
+      message: `Your wallet has been successfully
+       funded with ${paymentData.amount}NGN.`
+    });
 
 } catch (ex) {
   return serverError(res, ex);
 }
 }
 
-async function fundWallet(req:Request) {
+export const transferWalletFunds = async(req:Request, res:Response) => {
+  try {
+    let balance = new Balance();
+    let checkBalance = await balance.getBalance(req, res);
+    if(req.body.amount >= Number(checkBalance) || Number(checkBalance) === 0.00)
+      return res.status(401).json({
+        status: 'failed',
+        message: 'Insufficient funds!'
+      });
+    
+    const senderData = {
+      amount: req.body.amount,
+      userId: req.body.user._id,
+    }
+    const receiverData = {
+      amount: req.body.amount,
+      userId: req.params._id
+    }
+    await balance.decrementBalance(senderData, res);
+    await balance.incrementBalance(receiverData, res);
+    return res.status(200).json({
+      status: 'success',
+      message: `Your have successfully
+       funded this user with ${senderData.amount}NGN.`
+    });
+
+  } catch (ex) {
+    return serverError(res, ex);
+  }
+}
+
+const fundWallet = async(req:Request) => {
 
   await Wallet.updateOne({userId:req.body.user._id},{
     $inc: {walletBalance:req.body.amount}
@@ -150,4 +183,42 @@ class PaymentCheck{
       return serverError(res, ex);
   }
   }
+
+}
+
+class Balance{
+  constructor(){
+
+  }
+
+  async getBalance(req:Request, res:Response) {
+    try{
+    const walletBalance = await Wallet.findOne({userId:req.body.user._id}).select('walletBalance');
+      return walletBalance;
+    }catch (ex) {
+      return serverError(res, ex);
+  }
+    }
+
+  async incrementBalance(data:any, res:Response) {
+    try{
+    const walletBalance = await Wallet.updateOne({userId:data.userId}, {
+      $inc:{walletBalance:data.amount}
+    });
+      return walletBalance;
+    }catch (ex) {
+      return serverError(res, ex);
+  }
+    }
+
+  async decrementBalance(data:any, res:Response) {
+    try{
+    const walletBalance = await Wallet.updateOne({userId:data.userId}, {
+      $dec:{walletBalance:data.amount}
+    });
+      return walletBalance;
+    }catch (ex) {
+      return serverError(res, ex);
+  }
+    }
 }
