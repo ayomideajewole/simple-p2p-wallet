@@ -50,7 +50,7 @@ try {
     const data = {
       email: req.body.user.email,
       amount: req.body.amount*100,
-      callback_url:'http://localhost:3000/api/v1/wallet/fundWallet'
+      callback_url:`${process.env.BASE_URL}/api/v1/wallet/fundWallet`
     }
     let paystack = new Paystack();
     let initialize = await paystack.initializeTransaction(data, res);
