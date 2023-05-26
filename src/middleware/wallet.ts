@@ -214,7 +214,7 @@ class Balance{
   async decrementBalance(data:any, res:Response) {
     try{
     const walletBalance = await Wallet.updateOne({userId:data.userId}, {
-      $dec:{walletBalance:data.amount}
+      $inc:{walletBalance:-data.amount}
     });
       return walletBalance;
     }catch (ex) {
