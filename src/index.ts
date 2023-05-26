@@ -1,6 +1,6 @@
 require("dotenv").config();
 import express from "express";
-import routes from "./src/startup/routes";
+import routes from "./startup/routes";
 import passport from "passport";
 import session from "express-session";
 import cors from "cors";
@@ -28,7 +28,6 @@ app.get('/', (req, res)=>{
 routes(app);
 
 require("./config/passport")(passport);
-require("./startup/prod")(app);
 require("./startup/db")();
 
 const port = process.env.PORT || 3000;

@@ -27,12 +27,12 @@ const paymentSchema = new mongoose.Schema({
 
 export const Payment = mongoose.model('payment', paymentSchema);
 
-export function validate(payment:{}) {
+export function validatePayment(payment:{}) {
   const schema = Joi.object({
     amount: Joi.number().required(),
     userId: Joi.string().required(),
     reference: Joi.string().required(),
-    paymentGatewayResponse: Joi.object(),
+    paymentGatewayResponse: Joi.object().required(),
   });
  
   return schema.validate(payment);

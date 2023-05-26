@@ -16,17 +16,14 @@ const userSchema = new mongoose.Schema(
     firstName: {
       type: String,
       required: true,
-      minlength: 2,
     },
     lastName: {
       type: String,
       required: true,
-      minlength: 2,
     },
     email: {
       type: String,
       required: true,
-      unique: true,
     },
     password: {
       type: String,
@@ -44,7 +41,7 @@ export const validate = (user: {}) => {
   const schema = Joi.object({
     firstName: Joi.string().required(),
     lastName: Joi.string().required(),
-    email: Joi.string().required().email(),
+    email: Joi.string().required(),
     password: passwordComplexity(complexityOptions).required(),
   });
   return schema.validate(user);

@@ -1,8 +1,10 @@
+import axios from "axios";
+
 import {Request, Response} from "express";
 import { Wallet, validateWallet } from "../models/Wallet";
-import axios from "axios";
 import { serverError } from "../utils/error";
-import { Payment } from "../models/Payment";
+import { Payment, validatePayment } from "../models/Payment";
+import { User } from "../models/User";
 
 const header = {
   headers: {
@@ -12,14 +14,19 @@ const header = {
 
 export const createWallet = async(user:any, res:Response) => {
 try {
-    const {error} = validateWallet(user._id);
+  const data = {
+    userId: String(user._id),
+    email: user.email
+  }
+
+    const {error} = validateWallet(data);
     if(error)
       return res.status(400).json({
         status: 'failed!',
         message: error.details[0].message,
       });
     
-    let wallet = new Wallet(user._id);
+    let wallet = new Wallet(data);
     await wallet.save();
     
     return res.status(200).json({
@@ -34,9 +41,16 @@ try {
 
 export const initializePayment = async(req:Request, res:Response) => {
 try {
+    if (!req.body.email || !req.body.amount)
+      return res.status(400).json({
+        status: 'failed',
+        message: 'Missing fields! Kindly input required fields.',
+      });
+
     const data = {
       email: req.body.user.email,
-      koboAmount: req.body.amount*100,
+      amount: req.body.amount*100,
+      callback_url:'http://localhost:3000/api/v1/wallet/fundWallet'
     }
     let paystack = new Paystack();
     let initialize = await paystack.initializeTransaction(data, res);
@@ -44,13 +58,14 @@ try {
       return res.status(400).json({
         status: 'failed',
         message: 'The payment failed. Kindly try again.',
+        data: initialize
       });
     
     return res.status(200).json({
       status: 'success',
       message: `Payment initialized successfully. 
         Kindly follow this link to complete your payment:
-        ${initialize.authorization_url}`
+        ${initialize.data.authorization_url}`
     });
 } catch (ex) {
   return serverError(res, ex);
@@ -59,8 +74,9 @@ try {
 
 export const verifyPayment = async(req:any, res:Response) => {
 try {
-    let check = new PaymentCheck();
-    let paymentExists = await check.isPaymentDuplicated(req.query.reference, res);
+    let reference = req.query.reference;
+    let check = new PaymentCheck();    
+    let paymentExists = await check.isPaymentDuplicated(reference, res);    
     if (paymentExists)
       return res.status(400).json({
         status: 'failed',
@@ -68,22 +84,33 @@ try {
       });
     
     let paystack = new Paystack();
-    let verifyPaystackPayment = await paystack.verifyTransaction(res);
+    let verifyPaystackPayment = await paystack.verifyTransaction(reference, res);    
     if (verifyPaystackPayment.data.status !== 'success')
       return res.status(400).json({
         status: 'failed',
-        message: 'This payment is invalid.'
+        message: 'This payment is invalid.',
+        data: verifyPaystackPayment.message
       });
 
     let paymentData = {
-      amount: verifyPaystackPayment.data.status.amount/100,
+      amount: verifyPaystackPayment.data.amount/100,
       userId: req.body.user._id,
       reference: req.query.reference,
       paymentGatewayResponse: verifyPaystackPayment
     }
+
+    const {error} = validatePayment(paymentData);
+    if(error)
+      return res.status(400).json({
+        status: 'failed!',
+        message: error.details[0].message,
+      });
+
+    await fundWallet(req, paymentData.amount);
+
     let payment = new Payment(paymentData);
     await payment.save();
-    await fundWallet(req);
+
     return res.status(200).json({
       status: 'success',
       message: `Your wallet has been successfully
@@ -97,21 +124,37 @@ try {
 
 export const transferWalletFunds = async(req:Request, res:Response) => {
   try {
+    if (!req.body.email || !req.body.amount)
+      return res.status(400).json({
+        status: 'failed',
+        message: 'Missing fields! Kindly input required fields.',
+      });
+
+    let requestedAmount = Number(req.body.amount);  
+
     let balance = new Balance();
-    let checkBalance = await balance.getBalance(req, res);
-    if(req.body.amount >= Number(checkBalance) || Number(checkBalance) === 0.00)
+    let checkBalance = await balance.getBalance(req, res);    
+    if(requestedAmount <= 0.00 || requestedAmount >= Number(checkBalance))
       return res.status(401).json({
         status: 'failed',
         message: 'Insufficient funds!'
       });
+
+    let check = new PaymentCheck();
+    let checkReceiver = await check.doesReceiverExist(req.body.email, res);
+    if(checkReceiver !== true)
+      return res.status(401).json({
+        status: 'failed',
+        message: 'Recipient user does not exist!'
+      });
     
     const senderData = {
-      amount: req.body.amount,
+      amount: requestedAmount,
       userId: req.body.user._id,
     }
     const receiverData = {
-      amount: req.body.amount,
-      userId: req.params._id
+      amount: requestedAmount,
+      email: req.body.email
     }
     await balance.decrementBalance(senderData, res);
     await balance.incrementBalance(receiverData, res);
@@ -126,12 +169,31 @@ export const transferWalletFunds = async(req:Request, res:Response) => {
   }
 }
 
-const fundWallet = async(req:Request) => {
+export const getWalletBalance = async(req:Request, res:Response) => {
+ try {
 
+  let balance = new Balance();
+  let walletBalance = await balance.getBalance(req, res);
+
+  return res.status(200).json({
+    status: 'success',
+    message: `Wallet balance retrieved successfully.`,
+    data: {walletBalance: walletBalance}
+  });
+  
+ } catch (ex) {
+  return serverError(res, ex);
+ }
+
+}
+
+const fundWallet = async(req:Request,amount:number) => {
+ 
   await Wallet.updateOne({userId:req.body.user._id},{
-    $inc: {walletBalance:req.body.amount}
+    $inc: {walletBalance:amount}
   });
   return true;
+  
 }
 class Paystack {
   constructor() {
@@ -140,30 +202,30 @@ class Paystack {
   async initializeTransaction(data, res:Response){
     
     try {
-          const response = await axios.post(`${process.env.PAYSTACK_URL}/transaction/initialize/`,header, data);
-          console.log(response.data);
+          const response = await axios.post(`${process.env.PAYSTACK_URL}/transaction/initialize/`, data, header);
+          // console.log(response.data);
           
           return response.data
     } catch (ex) {
       if(ex.response.data.message){
-        return serverError(res, ex.response.data.message)
+        return ex.response.data.message
       }
-      return serverError(res, 'An error occured');
+      return 'An error occured';
     }
   }
 
-  async verifyTransaction(res:Response){
+  async verifyTransaction(reference:string, res:Response){
     
     try {
-          const response = await axios.get(`${process.env.PAYSTACK_URL}/transaction/verify/`,header);
-          console.log(response.data);
-          
-          return response.data
+      const response = await axios.get(`${process.env.PAYSTACK_URL}/transaction/verify/${reference}`,header);
+      // console.log(response.data);
+      
+      return response.data
     } catch (ex) {
       if(ex.response.data.message){
-        return serverError(res, ex.response.data.message)
+        return ex.response.data
       }
-      return serverError(res, 'An error occured');
+      return 'An error occured';
     }
   }
 }
@@ -184,6 +246,19 @@ class PaymentCheck{
   }
   }
 
+  async doesReceiverExist(email:string, res:Response) {
+    try{
+    const receiverExists = await User.findOne({email:email});
+    if (receiverExists){
+      return true;
+    } else{
+      return false;
+    } 
+    }catch (ex) {
+      return serverError(res, ex);
+  }
+  }
+
 }
 
 class Balance{
@@ -193,8 +268,10 @@ class Balance{
 
   async getBalance(req:Request, res:Response) {
     try{
-    const walletBalance = await Wallet.findOne({userId:req.body.user._id}).select('walletBalance');
-      return walletBalance;
+    const wallet = await Wallet.findOne({userId:req.body.user._id});
+    return wallet.walletBalance;
+      // console.log(walletBalance);
+      
     }catch (ex) {
       return serverError(res, ex);
   }
@@ -202,7 +279,7 @@ class Balance{
 
   async incrementBalance(data:any, res:Response) {
     try{
-    const walletBalance = await Wallet.updateOne({userId:data.userId}, {
+    const walletBalance = await Wallet.updateOne({email:data.email}, {
       $inc:{walletBalance:data.amount}
     });
       return walletBalance;
